@@ -1,0 +1,6 @@
+order_id,customer_id,order_status,order_amount
+o1, c1, delivered,100000
+o2, c2, delivered,150000
+o3, c1, delivered,50000
+o4, c3, Canceled,200000
+o5, c3, delivered,210000

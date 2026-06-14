@@ -2,9 +2,12 @@ import subprocess
 import sys
 
 steps =[
-    "load_customers.py",
+    "ingest.py",
     "create_staging_customers.py",
+    "create_staging_orders.py",
     "create_dim_customers.py",
+    "create_fact_orders.py",
+    "create_mart_revenue.py",
     "quality_runner.py"
 ]
 
