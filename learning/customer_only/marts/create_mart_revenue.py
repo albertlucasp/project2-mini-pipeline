@@ -1,8 +1,11 @@
-import duckdb
+from learning.customer_only.utility import (
+    create_schema_if_not_exists,
+    get_connection,
+    total_row_count,
+)
 
-con = duckdb.connect("customers.duckdb")
-
-con.execute("create schema if not exists marts")
+con = get_connection()
+create_schema_if_not_exists(con, schema="marts")
 
 con.execute(
     """
@@ -18,7 +21,7 @@ con.execute(
     """
 )
 
-row_count = con.execute("select count(*) from marts.mart_revenue").fetchone()[0]
+row_count = total_row_count(con, "select count(*) from marts.mart_revenue")
 print(f"Created marts.mart_revenue with {row_count} rows")
 
 con.close()

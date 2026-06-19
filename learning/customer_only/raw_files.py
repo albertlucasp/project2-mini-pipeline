@@ -1,20 +1,30 @@
-# Source contract and ingest loop behind the contract
+from dataclasses import dataclass
 
-class RawFiles:
-    def __init__(self, table_name: str, file_name: str, primary_key: tuple[str, ...]):
-        self.table_name = table_name
-        self.file_name = file_name
-        self.primary_key = primary_key
+@dataclass(frozen=True)
+class RawFile:
+    table_name: str
+    file_name: str
+    primary_key: tuple[str, ...]
 
 EXPECTED_RAW_FILES = (
-    RawFiles(
+    RawFile(
         table_name="raw.customers",
         file_name="customers.csv",
         primary_key=("customer_id",)
     ),
-    RawFiles(
+    RawFile(
         table_name="raw.orders",
         file_name="orders.csv",
         primary_key=("order_id",)
+    ),
+    RawFile(
+        table_name="raw.order_items",
+        file_name="order_items.csv",
+        primary_key=("order_id", "order_item_id",)
+    ),
+    RawFile(
+        table_name="raw.products",
+        file_name="products.csv",
+        primary_key=("product_id",)
     ),
 )

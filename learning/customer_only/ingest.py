@@ -1,18 +1,13 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "duckdb>=1.5.3",
-# ]
-# ///
 from pathlib import Path
 import duckdb
 
-from raw_files import EXPECTED_RAW_FILES
+from learning.customer_only.raw_files import EXPECTED_RAW_FILES
+from learning.customer_only.utility import DUCKDB_PATH
 
-BASE_DIR = Path(__file__).parent
-DUCKDB_PATH = BASE_DIR / "customers.duckdb"
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
 
-def ingest_raw_files():
+def ingest_raw_files() -> None:
     con = duckdb.connect(DUCKDB_PATH)
 
     con.execute("create schema if not exists raw")
@@ -31,8 +26,12 @@ def ingest_raw_files():
     )
 
     for raw_file in EXPECTED_RAW_FILES:
-        csv_path = BASE_DIR / raw_file.file_name
+        csv_path = DATA_DIR / raw_file.file_name
         table_name = raw_file.table_name
+
+        if not csv_path.exists():
+            con.close()
+            raise FileNotFoundError(f"Required source file does not exist: {csv_path}")
 
         con.execute(
             f"""
@@ -56,7 +55,7 @@ def ingest_raw_files():
             """,
             [table_name, str(csv_path), row_count],
         )
-        print(f"Loaded raw.{table_name} with {row_count} rows")
+        print(f"Loaded {table_name} with {row_count} rows")
     con.close()
 
 if __name__ == "__main__":

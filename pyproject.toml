@@ -1,0 +1,8 @@
+[project]
+name = "mini-data-pipeline"
+version = "0.3.0"
+description = "Milestone 3 multi-source DuckDB data pipeline."
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.5,<2.0",
+]

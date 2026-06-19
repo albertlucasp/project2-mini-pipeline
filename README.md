@@ -1,207 +1,133 @@
-# Mini Data Pipeline 2.1: Customers + Orders Analytics
+# Mini Data Pipeline: Milestone 3
 
-A foundational data engineering project demonstrating how data moves from raw source files into cleaned staging models, business-ready marts, and SQL-based quality checks.
+A four-source DuckDB pipeline for learning source contracts, layered data
+modeling, fact-table grain, reconciliation, and quality gates.
 
-This version expands the original customer-only pipeline into a small multi-source analytics pipeline using customers and orders data.
-
-## Purpose
-
-The project is built to strengthen core data engineering foundations:
-
-- How raw files are loaded into a database
-- How source contracts define expected input files
-- How raw data is cleaned into staging tables
-- How staging tables become analytical marts
-- How quality checks validate business-ready outputs
-
-## Architecture Pattern
-
-The pipeline follows a medallion-style architecture:
+## Architecture
 
 ```text
-CSV Files
-    |
-    v
-raw.customers + raw.orders              Bronze / Raw Layer
-    |
-    v
-staging.stg_customers + staging.stg_orders
-                                        Silver / Staging Layer
-    |
-    v
-marts.dim_customers + marts.fact_orders
-                                        Gold / Business Layer
-    |
-    v
-marts.mart_revenue                      Business Revenue Mart
-    |
-    v
-Data Quality Checks
+customers.csv  orders.csv  order_items.csv  products.csv
+                         |
+                         v
+               raw schema + audit log
+                         |
+                         v
+                  staging schema
+                         |
+                         v
+        dim_customers       dim_products
+        fact_orders         fact_order_items
+                         |
+                         v
+          mart_revenue      mart_revenue_by_products
+                         |
+                         v
+             contract and SQL quality checks
 ```
 
-## What Changed in 2.1
+## Declared Grain
 
-Compared with the original `project3-small-scope`, this version adds:
+The fact tables intentionally represent different business events:
 
-1. `orders.csv` as a second source file.
-2. A source contract in `raw_files.py`.
-3. Generic ingestion through `ingest.py`, replacing the customer-only `load_customers.py`.
-4. Raw table creation for each file defined in the source contract.
-5. `staging.stg_orders` created from `raw.orders`.
-6. `marts.fact_orders` created by joining staged orders with staged customers.
-7. `marts.mart_revenue`, showing total delivered-order revenue by customer.
-8. Updated quality checks that include `marts.mart_revenue`.
+| Table | Grain | Additive measure |
+| --- | --- | --- |
+| `marts.fact_orders` | One row per `order_id` | `order_amount` |
+| `marts.fact_order_items` | One row per `(order_id, order_item_id)` | `item_price` |
 
-## Pipeline Flow
+Order-level measures must not be summed after joining directly to order-item
+rows. The revenue mart therefore derives from `fact_orders`.
 
-```text
-customers.csv
-orders.csv
-    |
-    v
-ingest.py
-    |
-    v
-raw.customers
-raw.orders
-    |
-    v
-create_staging_customers.py
-create_staging_orders.py
-    |
-    v
-staging.stg_customers
-staging.stg_orders
-    |
-    v
-create_dim_customers.py
-create_fact_orders.py
-    |
-    v
-marts.dim_customers
-marts.fact_orders
-    |
-    v
-create_mart_revenue.py
-    |
-    v
-marts.mart_revenue
-    |
-    v
-quality_runner.py
-```
+## Step-by-Step Build Process
+
+This milestone was built incrementally from the earlier customers-and-orders
+pipeline:
+
+1. Added `order_items.csv` and `products.csv` as new source data.
+2. Reorganized the project into `data`, `staging`, `marts`, and `quality`
+   directories.
+3. Created `utility.py` so every pipeline step uses the same DuckDB path,
+   connection helper, schema helper, and row-count helper.
+4. Expanded `raw_files.py` so each source contract contains its fully
+   qualified raw table name, expected file name, and primary key.
+5. Updated ingestion to load every source contract through one loop and record
+   each load in the audit table.
+6. Created staging models for customers, orders, order items, and products,
+   including trimming, case normalization, and type casting.
+7. Separated the two fact grains:
+   - `fact_orders`: one row per order.
+   - `fact_order_items`: one row per item line within an order.
+8. Added the new staging, dimension, fact, mart, and quality steps to the
+   pipeline orchestrator in dependency order.
+9. Built two business outputs:
+   - customer revenue from the order-grain fact;
+   - product revenue from the order-item-grain fact.
+10. Added quality checks for source-contract keys, fact grains, relationships,
+    and reconciliation between order amounts and item prices.
+
+The original concise checklist remains in `notes.txt`.
 
 ## Project Structure
 
 ```text
 learning/customer_only/
-├── customers.csv
-├── orders.csv
-├── customers.duckdb
-├── raw_files.py
+├── data/
+│   ├── customers.csv
+│   ├── orders.csv
+│   ├── order_items.csv
+│   └── products.csv
+├── staging/
+├── marts/
+├── quality/
 ├── ingest.py
-├── create_staging_customers.py
-├── create_staging_orders.py
-├── create_dim_customers.py
-├── create_fact_orders.py
-├── create_mart_revenue.py
-├── data_quality.sql
-├── quality_runner.py
+├── raw_files.py
 ├── run_pipeline.py
-└── data_quality_result.txt
+└── utility.py
 ```
 
-## Layer Responsibilities
+## Run the Pipeline
 
-| Layer | Tables | Purpose |
-| --- | --- | --- |
-| Raw | `raw.customers`, `raw.orders` | Store source data loaded from CSV files |
-| Audit | `audit.ingestion_runs` | Track loaded source files, row counts, and load timestamps |
-| Staging | `staging.stg_customers`, `staging.stg_orders` | Clean and standardize raw data |
-| Marts | `marts.dim_customers`, `marts.fact_orders` | Create business-ready dimensional models |
-| Business Mart | `marts.mart_revenue` | Summarize delivered-order revenue by customer |
-| Quality | `data_quality.sql` | Validate important output tables |
-
-## Pipeline Execution
-
-Run the full pipeline from the project folder:
+From the repository root:
 
 ```bash
-cd learning/customer_only/
-uv run -w python run_pipeline.py
+uv run python learning/customer_only/run_pipeline.py
 ```
 
-The orchestrator runs these steps in order:
-
-1. `ingest.py`
-2. `create_staging_customers.py`
-3. `create_staging_orders.py`
-4. `create_dim_customers.py`
-5. `create_fact_orders.py`
-6. `create_mart_revenue.py`
-7. `quality_runner.py`
-
-If any quality check fails, the pipeline exits with an error.
+The pipeline can also be launched from another working directory because all
+source, database, script, and quality-result paths are resolved explicitly.
 
 ## Source Contract
 
-`raw_files.py` defines which raw files the pipeline expects:
+`raw_files.py` declares the expected source files, destination raw tables, and
+business keys. Ingestion uses the file and table metadata. The quality runner
+uses every declared primary key to check:
+
+- the raw table has rows;
+- primary-key columns are non-null;
+- the primary key is unique.
+
+## Quality Gates
+
+The pipeline fails when any of these invariants is violated:
+
+- customer, product, order, or order-item keys are invalid;
+- facts reference missing dimensions or parent orders;
+- an order-level amount does not reconcile to its item prices;
+- `fact_orders` contains more than one row per order;
+- `fact_order_items` contains duplicate item keys;
+- the customer revenue mart does not reconcile to delivered orders.
+
+The sample data deliberately includes an order with two items. This protects
+against the common error of joining item rows into an order-grain fact and
+double-counting order revenue.
+
+Quality evidence is written to:
 
 ```text
-customers.csv -> raw.customers
-orders.csv    -> raw.orders
+learning/customer_only/quality/data_quality_result.txt
 ```
-
-This makes ingestion more scalable than the original customer-only loader because new files can be added through the contract instead of hardcoding a new loader script for every source.
-
-## Business Output
-
-The main analytical output is `marts.mart_revenue`.
-
-It answers:
-
-```text
-How much delivered-order revenue did each customer generate?
-```
-
-The mart is built from `marts.fact_orders`, filtered to delivered orders, then grouped by customer.
-
-## Quality Checks
-
-`data_quality.sql` validates the important marts, including:
-
-- `marts.mart_revenue` has rows
-- customer IDs are not null in `marts.mart_revenue`
-- customer IDs are unique in `marts.mart_revenue`
-- `marts.dim_customers` has rows
-- customer IDs are not null in `marts.dim_customers`
-- customer IDs are unique in `marts.dim_customers`
-
-`quality_runner.py` executes the SQL checks and writes the result to:
-
-```text
-data_quality_result.txt
-```
-
-## Key Concepts Demonstrated
-
-- Source contracts for expected raw files
-- Multi-file ingestion
-- Raw, staging, and mart layer separation
-- Fact and dimension modeling
-- Business mart creation
-- Revenue aggregation
-- SQL-based data quality checks
-- Pipeline orchestration with Python
-
-## Technology Stack
-
-- Python 3.12+
-- DuckDB
-- SQL
-- CSV source files
-- Python subprocess orchestration
 
 ## Learning Outcome
 
-This project shows the next step after a customer-only data pipeline: moving into a small but realistic analytics workflow where multiple source files are loaded, transformed, joined, aggregated, and validated.
+Milestone 3 is complete when every source contributes to a business model,
+each fact has an explicit and enforced grain, relationships are tested, and
+aggregated outputs reconcile to their authoritative source grain.
