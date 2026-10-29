@@ -1,312 +1,133 @@
-# Mini Data Pipeline : Core Structure and Concept Foundations
-A foundational data engineering project demonstrating core pipeline concepts that form the backbone of enterprise production systems. This project purpose to help me to strenthen the basic de foundations & how the data move from one layer to another.
+# Mini Data Pipeline: Milestone 3
 
-## 🎯 Purpose
+A four-source DuckDB pipeline for learning source contracts, layered data
+modeling, fact-table grain, reconciliation, and quality gates.
 
-This project showcases the **fundamental architecture pattern** used in data warehouses and data lakes at any scale—from small analytics projects to Fortune 500 enterprises. Every well-designed production data pipeline, regardless of complexity, follows this layered structure.
+## Architecture
 
-## 🏗️ Architecture Pattern
-
-The pipeline implements the **medallion architecture** (bronze → silver → gold layers):
-
-```
-Raw Data (CSV)
-    ↓
-[LOAD] → raw.customers (Bronze Layer) → audit.ingestion_runs (Audit Trail)
-    ↓
-[TRANSFORM] → staging.stg_customers (Silver Layer)
-    ↓
-[REFINE] → marts.dim_customers (Gold Layer)
-    ↓
-[QUALITY] → Data Quality Checks
-```
-
-## 📊 Layers Explained
-
-| Layer | Purpose | Example in This Project | Enterprise Equivalent |
-|-------|---------|------------------------|----------------------|
-| **Raw/Bronze** | Immutable source data replica | `raw.customers` from CSV | Data lake ingestion (S3, HDFS) |
-| **Staging/Silver** | Cleaned, deduplicated data | `staging.stg_customers` with case normalization | Data transformation (dbt, Spark jobs) |
-| **Marts/Gold** | Business-ready analytics tables | `marts.dim_customers` dimension table | Snowflake, Redshift marts |
-| **Audit** | Lineage & governance tracking | `audit.ingestion_runs` metadata | Data catalog (Collibra, Alation) |
-| **Quality** | Validation & monitoring | Data quality SQL checks | dbt tests, Great Expectations |
-
-## 🔄 Pipeline Execution
-
-```bash
-python run_pipeline.py
+```text
+customers.csv  orders.csv  order_items.csv  products.csv
+                         |
+                         v
+               raw schema + audit log
+                         |
+                         v
+                  staging schema
+                         |
+                         v
+        dim_customers       dim_products
+        fact_orders         fact_order_items
+                         |
+                         v
+          mart_revenue      mart_revenue_by_products
+                         |
+                         v
+             contract and SQL quality checks
 ```
 
-**Sequential Execution:**
-1. `load_customers.py` — Ingest CSV → create raw layer + audit trail
-2. `create_staging_customers.py` — Transform raw → staging layer
-3. `create_dim_customers.py` — Refine staging → business marts
-4. `quality_runner.py` — Validate output + exit on failure
+## Declared Grain
 
-## 📁 Project Structure
+The fact tables intentionally represent different business events:
 
-```
+| Table | Grain | Additive measure |
+| --- | --- | --- |
+| `marts.fact_orders` | One row per `order_id` | `order_amount` |
+| `marts.fact_order_items` | One row per `(order_id, order_item_id)` | `item_price` |
+
+Order-level measures must not be summed after joining directly to order-item
+rows. The revenue mart therefore derives from `fact_orders`.
+
+## Step-by-Step Build Process
+
+This milestone was built incrementally from the earlier customers-and-orders
+pipeline:
+
+1. Added `order_items.csv` and `products.csv` as new source data.
+2. Reorganized the project into `data`, `staging`, `marts`, and `quality`
+   directories.
+3. Created `utility.py` so every pipeline step uses the same DuckDB path,
+   connection helper, schema helper, and row-count helper.
+4. Expanded `raw_files.py` so each source contract contains its fully
+   qualified raw table name, expected file name, and primary key.
+5. Updated ingestion to load every source contract through one loop and record
+   each load in the audit table.
+6. Created staging models for customers, orders, order items, and products,
+   including trimming, case normalization, and type casting.
+7. Separated the two fact grains:
+   - `fact_orders`: one row per order.
+   - `fact_order_items`: one row per item line within an order.
+8. Added the new staging, dimension, fact, mart, and quality steps to the
+   pipeline orchestrator in dependency order.
+9. Built two business outputs:
+   - customer revenue from the order-grain fact;
+   - product revenue from the order-item-grain fact.
+10. Added quality checks for source-contract keys, fact grains, relationships,
+    and reconciliation between order amounts and item prices.
+
+The original concise checklist remains in `notes.txt`.
+
+## Project Structure
+
+```text
 learning/customer_only/
-├── customers.csv                  # Source data
-├── customers.duckdb              # Embedded database (single file)
-├── load_customers.py             # Bronze layer ingestion
-├── create_staging_customers.py   # Silver layer transformation
-├── create_dim_customers.py       # Gold layer refinement
-├── data_quality.sql              # Quality checks
-├── quality_runner.py             # Quality orchestration
-├── run_pipeline.py               # Main pipeline orchestrator
-└── data_quality_result.txt       # Quality report output
+├── data/
+│   ├── customers.csv
+│   ├── orders.csv
+│   ├── order_items.csv
+│   └── products.csv
+├── staging/
+├── marts/
+├── quality/
+├── ingest.py
+├── raw_files.py
+├── run_pipeline.py
+└── utility.py
 ```
 
-## 🏁 Getting Started: Development Walkthrough
+## Run the Pipeline
 
-This section follows the exact process used to build this pipeline—ideal if you want to understand each step.
-
-### Step 1: Prepare Your Data
-
-Create `customers.csv` manually with your source data:
-```csv
-customer_id,customer_name,customer_city
-c1,Albert,Jakarta
-c2,Billy,Kalimantan
-c3,Clara,Manado
-```
-
-### Step 2: Load Data into Bronze Layer
-
-Run the data loading script using `uv`:
-```bash
-cd learning/customer_only/
-uv run -w duckdb load_customers.py
-```
-
-This creates:
-- `customers.duckdb` — DuckDB database file
-- `raw.customers` — Raw table (bronze layer)
-- `audit.ingestion_runs` — Metadata tracking (source file, record count, timestamp)
-
-### Step 3: Explore the Database (CLI Inspection)
-
-Verify the data was loaded correctly:
-```bash
-duckdb customers.duckdb
-```
-
-Inside the DuckDB CLI:
-```sql
--- View all schemas
-SHOW SCHEMAS;
-
--- View tables in raw schema
-SHOW TABLES FROM raw;
-
--- Describe the table structure
-DESCRIBE raw.customers;
-
--- Preview the data
-SELECT * FROM raw.customers;
-
--- Check audit trail
-SELECT * FROM audit.ingestion_runs;
-```
-
-### Step 4: Create Transformation Layer (Silver)
-
-Run the staging layer script:
-```bash
-uv run -w duckdb create_staging_customers.py
-```
-
-This creates:
-- `staging.stg_customers` — Cleaned & standardized data (silver layer)
-
-Re-verify with CLI:
-```bash
-duckdb customers.duckdb
-```
-
-```sql
-SHOW TABLES FROM staging;
-DESCRIBE staging.stg_customers;
-SELECT * FROM staging.stg_customers;
-```
-
-### Step 5: Run Manual Data Quality Checks (CLI)
-
-Before automating, test quality rules manually in DuckDB CLI:
-```sql
--- Check distinct customers
-SELECT DISTINCT customer_id, customer_name FROM staging.stg_customers;
-
--- Check for null values
-SELECT * FROM staging.stg_customers WHERE customer_id IS NULL;
-
--- Check row counts
-SELECT COUNT(*) as total_rows FROM staging.stg_customers;
-
--- Check for duplicates
-SELECT customer_id, COUNT(*) as count
-FROM staging.stg_customers
-GROUP BY customer_id
-HAVING COUNT(*) > 1;
-```
-
-### Step 6: Extract Quality Rules to SQL File
-
-Save your quality checks to `data_quality.sql`:
-```sql
--- Rule 1: Table has data
-SELECT 
-  'dim_customers_has_rows' as check_name,
-  CASE WHEN COUNT(*) > 0 THEN 'pass' ELSE 'fail' END as status
-FROM marts.dim_customers;
-
--- Rule 2: No null customer_ids
-SELECT 
-  'customer_id_not_null' as check_name,
-  CASE WHEN COUNT(*) = COUNT(customer_id) THEN 'pass' ELSE 'fail' END as status
-FROM marts.dim_customers;
-
--- Rule 3: No duplicate customers
-SELECT 
-  'no_duplicate_customers' as check_name,
-  CASE WHEN COUNT(*) = COUNT(DISTINCT customer_id) THEN 'pass' ELSE 'fail' END as status
-FROM marts.dim_customers;
-```
-
-Run checks manually:
-```bash
-duckdb customers.duckdb < data_quality.sql > data_quality_result.txt
-cat data_quality_result.txt
-```
-
-### Step 7: Automate with Pipeline Orchestrator
-
-Run all transformation steps automatically:
-```bash
-uv run -w python run_pipeline.py
-```
-
-This executes sequentially:
-1. `load_customers.py` → Load CSV to bronze
-2. `create_staging_customers.py` → Transform to silver
-3. `create_dim_customers.py` → Create gold mart
-
-### Step 8: Integrate Quality Checks into Pipeline
-
-The `quality_runner.py` automatically runs your `data_quality.sql` checks:
-```bash
-uv run -w python quality_runner.py
-```
-
-**Behavior:**
-- ✅ Parses `data_quality.sql` and executes each query
-- ✅ Generates report in `data_quality_result.txt`
-- ❌ **Stops the pipeline** if any check has `status = 'fail'`
-- ✅ Prints failed checks to console with details
-
-### Step 9: Run Complete Pipeline with Quality Gates
-
-Combine everything:
-```bash
-uv run -w python run_pipeline.py
-```
-
-This now includes:
-1. Load → Audit
-2. Transform
-3. Refine
-4. **Quality Checks** (stops here if any fail)
-
-### Quick Reference: Full Pipeline Run
+From the repository root:
 
 ```bash
-cd learning/customer_only/
-
-# Install DuckDB
-uv pip install duckdb
-
-# Run entire pipeline (all steps + quality)
-uv run -w python run_pipeline.py
-
-# View the results
-cat data_quality_result.txt
-
-# Inspect database manually if needed
-duckdb customers.duckdb
-# Inside CLI: SELECT * FROM marts.dim_customers;
+uv run python learning/customer_only/run_pipeline.py
 ```
 
-## 🚀 How This Scales to Enterprise
+The pipeline can also be launched from another working directory because all
+source, database, script, and quality-result paths are resolved explicitly.
 
-| Aspect | Small Scale (This Project) | Enterprise Scale |
-|--------|---------------------------|------------------|
-| **Data Source** | Local CSV | APIs, databases, data lakes |
-| **Database** | DuckDB (single file) | Snowflake, Redshift, BigQuery |
-| **Transformation** | Python + SQL | dbt, Spark, Airflow |
-| **Orchestration** | Sequential Python script | Apache Airflow, Dagster, Prefect |
-| **Quality Checks** | SQL queries | dbt tests, Great Expectations |
-| **Monitoring** | Console output | Datadog, Prometheus, custom dashboards |
-| **Scalability** | Single dataset | 1000s of tables across departments |
-| **Deployment** | Local machine | Kubernetes, cloud services |
+## Source Contract
 
-### Example: What Changes at Scale?
+`raw_files.py` declares the expected source files, destination raw tables, and
+business keys. Ingestion uses the file and table metadata. The quality runner
+uses every declared primary key to check:
 
-**Small (This Project):**
-```python
-for step in steps:
-    subprocess.run([sys.executable, step], check=True)
+- the raw table has rows;
+- primary-key columns are non-null;
+- the primary key is unique.
+
+## Quality Gates
+
+The pipeline fails when any of these invariants is violated:
+
+- customer, product, order, or order-item keys are invalid;
+- facts reference missing dimensions or parent orders;
+- an order-level amount does not reconcile to its item prices;
+- `fact_orders` contains more than one row per order;
+- `fact_order_items` contains duplicate item keys;
+- the customer revenue mart does not reconcile to delivered orders.
+
+The sample data deliberately includes an order with two items. This protects
+against the common error of joining item rows into an order-grain fact and
+double-counting order revenue.
+
+Quality evidence is written to:
+
+```text
+learning/customer_only/quality/data_quality_result.txt
 ```
 
-**Enterprise:**
-```python
-# Apache Airflow DAG
-@dag(schedule_interval='0 2 * * *')
-def production_pipeline():
-    load_task = PythonOperator(task_id='load_customers')
-    transform_task = PythonOperator(task_id='transform_customers')
-    quality_task = PythonOperator(task_id='quality_checks')
-    
-    load_task >> transform_task >> quality_checks
-```
+## Learning Outcome
 
-The **logic is identical**; only the execution framework changes.
-
-## 🛠️ Technology Stack
-
-- **Python 3.12+** — Script orchestration
-- **DuckDB** — Analytical database (production would use Snowflake, BigQuery, etc.)
-- **SQL** — Transformation & validation logic
-- **Subprocess** — Basic task orchestration (production would use Airflow, Dagster, etc.)
-
-## 🔍 Key Data Engineering Concepts Demonstrated
-
-✅ **Idempotent Transformations** — Can re-run safely without duplicates  
-✅ **Lineage Tracking** — Audit table shows data source and load time  
-✅ **Data Quality as Code** — SQL-based validation rules  
-✅ **Layered Architecture** — Separation of concerns (raw → staging → marts)  
-✅ **Schema Management** — Explicit schema creation for data organization  
-✅ **Error Handling** — Pipeline fails fast on quality failures  
-
-## 📈 Future Enhancements (Roadmap)
-
-- [ ] Multi-table pipelines (customers + orders)
-- [ ] More staging models & business logic
-- [ ] Automated testing framework
-- [ ] Airflow orchestration
-- [ ] Docker containerization
-- [ ] CI/CD integration
-- [ ] Cloud deployment (GCP, AWS, Azure)
-
-## 💡 Learning Outcomes
-
-By studying this project, you'll understand:
-
-1. **How data flows** from raw sources through transformation layers
-2. **Why layered architecture matters** for maintainability and data quality
-3. **The role of audit trails** in production systems
-4. **How to implement quality checks** as part of the pipeline
-5. **The scalability pattern** used by Netflix, Uber, Airbnb, etc.
-
-
-**This project is a teaching tool showing the fundamental patterns that power enterprise data infrastructure.**
+Milestone 3 is complete when every source contributes to a business model,
+each fact has an explicit and enforced grain, relationships are tested, and
+aggregated outputs reconcile to their authoritative source grain.

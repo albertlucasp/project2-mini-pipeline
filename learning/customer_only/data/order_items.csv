@@ -1,0 +1,7 @@
+order_id,order_item_id,product_id,item_price
+o1,1,p1,60000
+o1,2,p2,40000
+o2,1,p2,150000
+o3,1,p3,50000
+o4,1,p1,200000
+o5,1,p2,210000
